@@ -208,8 +208,30 @@ if raw_file is None or codebook_file is None:
     st.info("rawdata와 codebook 파일을 업로드하면 설정 단계가 나타납니다.")
     st.stop()
 cfg = load_settings_xlsx(settings_file)
+raw_sheets = qc.read_excel_all(raw_file)
+codebook = qc.read_first_sheet(codebook_file)
+sheet_names = list(raw_sheets.keys())
+raw_all = all_columns(raw_sheets)
+raw_common = common_columns(raw_sheets) or raw_all
+cb_cols = [str(c).strip() for c in codebook.columns]
 
-# settings.xlsx의 실제 내용이 바뀌면 기존 설정값 초기화
+def match_option(value, options, fallback=None):
+    """settings 값과 실제 옵션을 공백·대소문자 차이를 무시하고 매칭."""
+    if value:
+        normalized_options = {
+            qc.normalize_name(option): option
+            for option in options
+        }
+
+        normalized_value = qc.normalize_name(value)
+
+        if normalized_value in normalized_options:
+            return normalized_options[normalized_value]
+
+    return fallback
+
+
+# settings.xlsx의 실제 내용으로 파일 변경 여부 확인
 if settings_file is not None:
     settings_signature = hashlib.sha256(
         settings_file.getvalue()
@@ -217,36 +239,94 @@ if settings_file is not None:
 else:
     settings_signature = None
 
+
+# settings 파일이 새로 업로드되거나 변경됐을 때만 적용
 if st.session_state.get("settings_signature") != settings_signature:
     st.session_state["settings_signature"] = settings_signature
 
-    widget_keys = [
-    "cfg_subject",
-    "cfg_visit",
-    "cfg_visitdt",
-    "cfg_var",
-    "cfg_form",
-    "cfg_codelist",
-    "cfg_res",
-    "cfg_datatype",
-    "cfg_base_sheets",
-    "cfg_skip_var_names",
-    "cfg_exclude_cols",
-    "cfg_same_day_visits",
-    "cfg_agg_threshold",
-    "cfg_pattern_threshold",
+    if settings_file is not None:
+        # 단일 선택값
+        st.session_state["cfg_subject"] = match_option(
+            cfg.get("subject_col"),
+            raw_common,
+            guess_subject(raw_common)
+        )
 
-]
+        st.session_state["cfg_visit"] = match_option(
+            cfg.get("visit_col"),
+            raw_common,
+            guess_kw(raw_common, ("VIS", "방문"))
+        )
 
-    for key in widget_keys:
-        st.session_state.pop(key, None)
+        st.session_state["cfg_visitdt"] = match_option(
+            cfg.get("visit_date_col"),
+            raw_common,
+            guess_kw(raw_common, ("VISITDT", "방문일", "_DT"))
+        )
 
-raw_sheets = qc.read_excel_all(raw_file)
-codebook = qc.read_first_sheet(codebook_file)
-sheet_names = list(raw_sheets.keys())
-raw_all = all_columns(raw_sheets)
-raw_common = common_columns(raw_sheets) or raw_all
-cb_cols = [str(c).strip() for c in codebook.columns]
+        st.session_state["cfg_var"] = match_option(
+            cfg.get("variable_col"),
+            cb_cols,
+            guess_kw(cb_cols, ("변수명", "ITEM NAME", "VARIABLE"))
+        )
+
+        st.session_state["cfg_form"] = match_option(
+            cfg.get("form_col"),
+            cb_cols,
+            guess_kw(cb_cols, ("ECRF", "CRF", "FORM", "시트"))
+        )
+
+        st.session_state["cfg_codelist"] = match_option(
+            cfg.get("codelist_col"),
+            cb_cols,
+            guess_kw(cb_cols, ("코드리스트", "CODE LIST"))
+        )
+
+        st.session_state["cfg_res"] = match_option(
+            cfg.get("res_col"),
+            cb_cols,
+            guess_kw(cb_cols, ("항목명", "ITEM LABEL", "LABEL"))
+        )
+
+        data_type_options = ["(없음)"] + cb_cols
+        st.session_state["cfg_datatype"] = match_option(
+            cfg.get("data_type_col"),
+            data_type_options,
+            "(없음)"
+        )
+
+        # 복수 선택값
+        sheet_map = {
+            qc.normalize_name(value): value
+            for value in sheet_names
+        }
+
+        st.session_state["cfg_base_sheets"] = [
+            sheet_map[qc.normalize_name(value)]
+            for value in settings_list(cfg.get("base_sheets"))
+            if qc.normalize_name(value) in sheet_map
+        ]
+
+        st.session_state["cfg_skip_var_names"] = [
+            value
+            for value in settings_list(cfg.get("skip_var_names"))
+            if value in raw_all
+        ]
+
+        st.session_state["cfg_exclude_cols"] = [
+            value
+            for value in settings_list(cfg.get("exclude_cols"))
+            if value in raw_all
+        ]
+
+        # 숫자값
+        st.session_state["cfg_agg_threshold"] = int(
+            float(cfg.get("aggregate_threshold", 10))
+        )
+
+        st.session_state["cfg_pattern_threshold"] = int(
+            float(cfg.get("pattern_unique_threshold", 10))
+        )
 
 msg = f"rawdata 시트 {len(sheet_names)}개, codebook 컬럼 {len(cb_cols)}개"
 if cfg:
@@ -324,6 +404,14 @@ with st.expander("검증 옵션 (선택)", expanded=False):
             if visit_col in raw_sheets[b].columns:
                 _visit_vals += [qc.normalize_value(v) for v in raw_sheets[b][visit_col].dropna()]
         _visit_vals = sorted(set(v for v in _visit_vals if v))
+        if (
+            settings_file is not None and "cfg_same_day_visits" not in st.session_state):
+                st.session_state["cfg_same_day_visits"] = [value  for value in settings_list(cfg.get("same_day_visits"))
+        if value in _visit_vals
+    ]
+
+
+       
         same_day_visits = st.multiselect(
             "같은 날 방문 허용", _visit_vals,
             default=[v for v in settings_list(cfg.get("same_day_visits")) if v in _visit_vals],     key="cfg_same_day_visits",  help="Screening, Visit1과 같이 방문명은 다르지만 방문일이 같을 수 있는 경우 선택해주세요.")
