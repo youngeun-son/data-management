@@ -17,6 +17,7 @@ warnings.filterwarnings("ignore", message="Could not infer format")
 
 import re
 import hmac
+import hashlib
 import pandas as pd
 import streamlit as st
 
