@@ -16,12 +16,59 @@ warnings.filterwarnings("ignore", message="Conditional Formatting extension")
 warnings.filterwarnings("ignore", message="Could not infer format")
 
 import re
+import hmac
 import pandas as pd
 import streamlit as st
 
 import qc_core as qc
 
 st.set_page_config(page_title="Clinical Data QC", layout="wide")
+
+def check_password():
+    """공용 비밀번호 확인."""
+
+    # 이미 비밀번호 인증을 완료한 경우
+    if st.session_state.get("password_correct", False):
+        return True
+
+    st.title("Data Management 검증")
+    st.caption("서비스를 이용하려면 비밀번호를 입력해 주세요.")
+
+    password = st.text_input(
+        "비밀번호",
+        type="password",
+        placeholder="비밀번호를 입력하세요",
+        key="login_password"
+    )
+
+    if st.button("로그인", type="primary"):
+        if hmac.compare_digest(
+            password,
+            st.secrets["APP_PASSWORD"]
+        ):
+            st.session_state["password_correct"] = True
+            st.session_state.pop("login_password", None)
+            st.rerun()
+        else:
+            st.error("비밀번호가 올바르지 않습니다.")
+
+    return False
+
+
+# 비밀번호가 맞지 않으면 아래 검증 화면을 실행하지 않음
+if not check_password():
+    st.stop()
+
+
+# 로그인 이후 사이드바
+with st.sidebar:
+    st.success("로그인되었습니다.")
+
+    if st.button("로그아웃"):
+        st.session_state["password_correct"] = False
+        st.rerun()
+
+
 
 # settings.xlsx 구분 별칭 (cli.py와 동일하게 유지)
 SETTINGS_ALIASES = {
