@@ -324,9 +324,9 @@ with st.expander("검증 옵션 (선택)", expanded=False):
         _visit_vals = sorted(set(v for v in _visit_vals if v))
         same_day_visits = st.multiselect(
             "같은 날 방문 허용", _visit_vals,
-            default=[v for v in settings_list(cfg.get("same_day_visits")) if v in _visit_vals],     key="cfg_same_day_visits",     key="cfg_agg_threshold", help="Screening, Visit1과 같이 방문명은 다르지만 방문일이 같을 수 있는 경우 선택해주세요.")
+            default=[v for v in settings_list(cfg.get("same_day_visits")) if v in _visit_vals],     key="cfg_same_day_visits",   help="Screening, Visit1과 같이 방문명은 다르지만 방문일이 같을 수 있는 경우 선택해주세요.")
         agg_threshold = st.number_input("집계 임계값", 2, 1000,
-                                        int(float(cfg.get("aggregate_threshold", 10))),
+                                        int(float(cfg.get("aggregate_threshold", 10))),   key="cfg_agg_threshold", 
         help = "같은 오류가 집계 임계값보다 많을 경우 한 행으로 축약하여 출력됩니다.")
         pattern_threshold = st.number_input("패턴 임계값", 2, 100,
                                             int(float(cfg.get("pattern_unique_threshold", 10))), key="cfg_pattern_threshold",
