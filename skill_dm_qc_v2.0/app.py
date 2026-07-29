@@ -181,7 +181,7 @@ def build_settings_bytes():
 
 # ================== 화면 ==================
 st.title("Data Management 검증")
-st.caption("rawdata와 codebook을 업로드하면 설정을 확인한 뒤 전체 검증을 한 번에 실행합니다.  \n settings.xlsx와 classification_reviewed.xlsx는 아래 개별 검증에서 생성·다운로드한 후 업로드하여 사용할 수 있으며, 최초 1회만 설정하면 이후에도 계속 사용할 수 있습니다")
+st.caption("rawdata와 codebook을 업로드하면 설정을 확인한 뒤 전체 검증을 한 번에 실행합니다.  \n settings.xlsx와 classification_reviewed.xlsx, date_rules.xlsx는 아래 개별 검증에서 생성·다운로드한 후 업로드하여 사용할 수 있으며, 최초 1회만 설정하면 이후에도 계속 사용할 수 있습니다.")
 st.header("1. 파일 업로드")
 st.markdown("**필수 파일**")
 r1c1, r1c2 = st.columns(2)
@@ -192,7 +192,7 @@ with r1c2:
     codebook_file = st.file_uploader("codebook.xlsx", type=["xlsx", "xls"])
 
 st.markdown("**선택 파일**")
-st.caption("이전에 이 화면에서 저장한 파일이 있으면 업로드하고 처음이면 비워두세요.")
+st.caption("이전에 이 화면에서 해당 연구로 저장한 파일이 있으면 업로드하고 처음이면 비워두세요.")
 r2c1, r2c2, r2c3 = st.columns(3)
 with r2c1:
     settings_file = st.file_uploader("settings.xlsx (선택)", type=["xlsx", "xls"])
@@ -335,7 +335,7 @@ st.success(msg)
 
 # ---------- 2단계: 설정 (settings값 > 자동감지값 순으로 기본 채움) ----------
 st.header("2. 설정")
-st.caption("settings.xlsx 값이 있으면 그 값을, 없으면 자동 감지값을 기본으로 채웁니다. 확인 후 수정해주세요.")
+st.caption("settings.xlsx 값이 있으면 그 값을, 없으면 자동 감지값을 기본으로 채웁니다. 채워진 값을 확인 후 필요 시 수정해주세요.")
 
 with st.expander("rawdata 컬럼 매핑", expanded=True):
     cc1, cc2, cc3 = st.columns(3)
@@ -432,7 +432,7 @@ st.download_button(
 
 # ---------- 3단계: 코드리스트 분류 미리보기·수정 ----------
 st.header("3. 코드리스트 분류 확인")
-st.caption("코드리스트를 choice / range / date / free_text로 자동 분류한 결과입니다.   \n 타입이 틀린 변수는 표에서 codelist_type과 valid_value를 직접 수정한 뒤 아래 [분류 확정]을 누르세요.   \n 구분이 모호한 경우 free_text로 구분하세요")
+st.caption("classification_reviewed.xlsx이 있으면 그 값을, 없으면 코드리스트를 choice / range / date / free_text로 자동 분류한 결과입니다.   \n 분류가 잘못된 변수는 표에서 codelist_type과 valid_value를 직접 수정한 뒤 아래 [분류 확정]을 누르세요.   \n 구분이 모호한 경우 free_text로 구분하세요. ")
 
 # 분류 생성 (classification 파일 있으면 그걸, 없으면 자동 분류)
 _cb_norm = qc.normalize_codebook_names(codebook, [variable_col, form_col])
@@ -521,7 +521,7 @@ st.download_button(
 # ---------- 4단계: 날짜 선후관계 규칙 ----------
 st.header("4. 날짜 선후관계 규칙 (선택)")
 st.caption("date로 분류된 변수끼리 '빠른 날짜 ≤ 늦은 날짜' 규칙을 만듭니다. "
-           "예: 동의일 ≤ 등록일.  \n date_rules.xlsx를 업로드하였다면 그 규칙이 기본으로 들어갑니다.")
+           "예: 발현일 ≤ 소실일.  \n date_rules.xlsx를 업로드하였다면 그대로 표시됩니다.")
 
 # date로 분류된 변수 목록 (확정된 분류 기준)
 _cls = st.session_state["cls_edited"]
