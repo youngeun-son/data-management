@@ -208,9 +208,39 @@ if raw_file is None or codebook_file is None:
     st.stop()
 
 cfg = load_settings_xlsx(settings_file)
+
+# settings.xlsx가 새로 업로드되면 기존 화면 선택값 초기화
+settings_signature = (
+    settings_file.name,
+    settings_file.size
+) if settings_file is not None else None
+
+if st.session_state.get("settings_signature") != settings_signature:
+    st.session_state["settings_signature"] = settings_signature
+
+    widget_keys = [
+    "cfg_subject",
+    "cfg_visit",
+    "cfg_visitdt",
+    "cfg_var",
+    "cfg_form",
+    "cfg_codelist",
+    "cfg_res",
+    "cfg_datatype",
+    "cfg_base_sheets",
+    "cfg_skip_var_names",
+    "cfg_exclude_cols",
+    "cfg_same_day_visits",
+    "cfg_agg_threshold",
+    "cfg_pattern_threshold",
+
+]
+
+    for key in widget_keys:
+        st.session_state.pop(key, None)
+
 raw_sheets = qc.read_excel_all(raw_file)
 codebook = qc.read_first_sheet(codebook_file)
-
 sheet_names = list(raw_sheets.keys())
 raw_all = all_columns(raw_sheets)
 raw_common = common_columns(raw_sheets) or raw_all
@@ -248,8 +278,13 @@ with st.expander("rawdata 컬럼 매핑", expanded=True):
         _norm_map = {qc.normalize_name(s): s for s in sheet_names}
         _base_default = [_norm_map[qc.normalize_name(b)] for b in settings_list(cfg["base_sheets"])
                          if qc.normalize_name(b) in _norm_map] or _base_default
-    base_sheets = st.multiselect("기준 시트", sheet_names, default=_base_default,
-                                 help="위에서 지정한 Subject ID, 방문명의 모든 조합이 포함되도록 설정해주세요.  \n ex. Outcome_NRS, Screening_NRS")
+    base_sheets = st.multiselect(
+    "기준 시트",
+    sheet_names,
+    default=_base_default,
+    key="cfg_base_sheets",
+    help="위에서 지정한 Subject ID, 방문명의 모든 조합이 포함되도록 설정해주세요.  \n ex. Outcome_NRS, Screening_NRS")
+
 
 with st.expander("codebook 컬럼 매핑", expanded=True):
     mc1, mc2, mc3 = st.columns(3)
@@ -274,12 +309,13 @@ with st.expander("검증 옵션 (선택)", expanded=False):
     with oc1:
         skip_var_names = st.multiselect(
             "변수명검증·입력값검증·pattern 출력 제외 변수", raw_all,
-            default=[v for v in settings_list(cfg.get("skip_var_names")) if v in raw_all],
+            default=[v for v in settings_list(cfg.get("skip_var_names")) if v in raw_all],     key="cfg_skip_var_names",
             help="'Subject ID', '최종 확인자 성명' 등과 같이 코드리스트에 없지만 문제없는 경우 선택해주세요.  \n 여기에 분류한 변수는 반드시 3.코드리스트 분류 확인에서 'free_text'로 설정해주세요.")
         
         exclude_cols = st.multiselect(
             "공통값 비교 제외 변수", raw_all,
-            default=[v for v in settings_list(cfg.get("exclude_cols")) if v in raw_all], help = "'연구자 마지막 확인일'과 같이 동일 변수명을 사용하지만 시트별로 다른 값이 기재될 수 있는 경우 선택해주세요." )
+            default=[v for v in settings_list(cfg.get("exclude_cols")) if v in raw_all], key="cfg_exclude_cols",
+            help = "'연구자 마지막 확인일'과 같이 동일 변수명을 사용하지만 시트별로 다른 값이 기재될 수 있는 경우 선택해주세요." )
     with oc2:
         _visit_vals = []
         for b in base_sheets:
@@ -288,12 +324,12 @@ with st.expander("검증 옵션 (선택)", expanded=False):
         _visit_vals = sorted(set(v for v in _visit_vals if v))
         same_day_visits = st.multiselect(
             "같은 날 방문 허용", _visit_vals,
-            default=[v for v in settings_list(cfg.get("same_day_visits")) if v in _visit_vals], help="Screening, Visit1과 같이 방문명은 다르지만 방문일이 같을 수 있는 경우 선택해주세요.")
+            default=[v for v in settings_list(cfg.get("same_day_visits")) if v in _visit_vals],     key="cfg_same_day_visits",     key="cfg_agg_threshold", help="Screening, Visit1과 같이 방문명은 다르지만 방문일이 같을 수 있는 경우 선택해주세요.")
         agg_threshold = st.number_input("집계 임계값", 2, 1000,
                                         int(float(cfg.get("aggregate_threshold", 10))),
         help = "같은 오류가 집계 임계값보다 많을 경우 한 행으로 축약하여 출력됩니다.")
         pattern_threshold = st.number_input("패턴 임계값", 2, 100,
-                                            int(float(cfg.get("pattern_unique_threshold", 10))),
+                                            int(float(cfg.get("pattern_unique_threshold", 10))), key="cfg_pattern_threshold",
         help = "한 변수의 unique 값이 패턴 임계값보다 많을 경우 'O'로 출력됩니다.")
 
 st.download_button(
