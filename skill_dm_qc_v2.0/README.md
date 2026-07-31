@@ -122,7 +122,7 @@ classification_reviewed.xlsx를 업로드했다면 그 값을 그대로 보여�
 |---|---|---|---|
 | SEX | choice | 1\|2 | - |
 | AGE | free_text |  | - |
-| PREGYN | choice | 0\|1\|7777 | - |
+| PREGYN | choice | 0\|1 | - |
 | CAUSEDDT | date | - | - |
 | NRS | range | 0~10 | 코드리스트에 직접 기재한 값 그대로 반영됨 |
 | VAS | range | 0~100 | 코드리스트를 비워둬도 자동 분류됨 (아래 참고) |
