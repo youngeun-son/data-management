@@ -30,7 +30,7 @@ Data Management 검증 도구는 rawdata와 codebook을 기준으로 DM을 자�
 |---|---|
 | 0_스크리닝 | 스크리닝 방문에서 수집하는 기본 정보 (동의일, 사고발생일, 성별, 나이 등) |
 | 1_스크리닝_NRS | 스크리닝 방문의 NRS(통증 점수) 기록 |
-| 2_OUTCOME_NRS | 추적관찰 방문(Visit1~3)의 NRS · VAS 결과 및 정보수집방법 |
+| 2_OUTCOME_PRI | 추적관찰 방문(Visit1~3)의 NRS · VAS 결과 및 정보수집방법 |
 | 3_OUTCOME_PGIC | 마지막 방문(Visit3)의 PGIC(전반적 인상 변화) 결과 |
 | CODEBOOK | 위 시트들에 쓰인 변수의 이름 · 소속 시트 · 허용값(코드리스트) · 설명 · 데이터 유형을 정의한 코드북 |
 
