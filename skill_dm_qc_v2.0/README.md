@@ -22,8 +22,8 @@ Data Management 검증 도구는 rawdata와 codebook을 기준으로 DM을 자�
 
 ## 데모 데이터 소개
 아래 예시는 `codelist_예시.xlsx와 rawdata_예시.xlsx.xlsx` 파일을 기준으로 작성했습니다. 직접 열어서 각 시트를 확인하며 따라오시면 이해가 쉽습니다. 
-([codelist_예시.xlsx ](./codelist_예시.xlsx )
-([rawdata_예시.xlsx ](./rawdata_예시.xlsx )
+([codelist_예시.xlsx ])(./codelist_예시.xlsx )
+([rawdata_예시.xlsx ])(./rawdata_예시.xlsx )
 
 
 | 시트명 | 설명 |
