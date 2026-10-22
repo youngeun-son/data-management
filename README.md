@@ -42,7 +42,6 @@ Python을 다루지 않는 사용자도 브라우저에서 파일 업로드와 �
 | `settings.xlsx` | 연구 정의 파일 예시이다. |
 | `classification_reviewed.xlsx` | 코드리스트 분류 파일 예시이다. |
 
-> `.streamlit/secrets.toml`(접속 비밀번호)과 실제 연구 데이터는 저장소에 올리지 않는다.
 
 ## 3. 설치 및 서버 실행 (관리자)
 
