@@ -275,3 +275,28 @@ Claude 팀 계정에 공유된 스킬 `dm-file-generator`로 정의 파일 작�
 - **서로 다른 시트의 서로 다른 변수 간 조건부 논리는 검증하지 않는다.** (예: 시트1에서 약침 사용 = 예 → 시트2에 약침 종류 기록 필요) 이 항목은 rawdata에서 직접 대조한다.
 - **모든 대상자에게 특정 방문이 통째로 없으면 방문 누락으로 검출되지 않는다.** 연구계획서의 측정 시점과 별도로 대조한다.
 - **unique 결과와 Claude 검토 결과는 참고 자료이다.** 최종 오류 여부는 담당자가 판단한다.
+
+
+## 10. 업데이트 내역
+
+### 2026-10-28 Error updates
+
+**1. date_rules.xlsx 재업로드 미반영 수정**
+- 문제: date_rules.xlsx를 처음 한 번만 읽어, 파일을 교체해도 규칙이 바뀌지 않았다.
+- 수정: 파일을 새로 올리거나 교체하면 다시 읽어 규칙 목록을 갱신한다.
+- 참고: 업로드 시 화면에서 추가·삭제한 규칙은 파일 내용으로 바뀐다. 유지하려면 먼저 [날짜 규칙을 date_rules.xlsx로 저장]을 누른다.
+
+**2. classification_reviewed.xlsx 같은 이름 재업로드 미반영 수정**
+- 문제: 수정한 파일을 같은 이름으로 다시 올리면 변경 내용이 반영되지 않았다.
+- 수정: 파일 이름이 같아도 새 업로드면 다시 읽는다.
+
+**3. settings.xlsx 업로드 시 TypeError 수정**
+- 문제: settings.xlsx를 업로드하면 `match_option() takes from 2 to 3 positional arguments but 4 were given` 오류가 발생했다.
+- 수정: 데이터 유형 컬럼 기본값 지정 코드를 수정했다.
+- 추가: 'Type' 컬럼을 글자 단위(T·Y·P·E)로 찾던 문제를 단어 단위로 찾도록 수정했다.
+
+**4. settings.xlsx 업로드 시 Session State 경고 수정**
+- 문제: settings.xlsx를 업로드하면 `The widget with key "cfg_subject" was created with a default value but also had its value set via the Session State API.` 경고가 표시됐다.
+- 수정: 선택 칸의 기본값을 한 곳에서만 지정하도록 정리했다.
+- 추가: settings에 적힌 시트·변수가 현재 데이터에 없으면 자동으로 제외한다.
+- 추가: settings.xlsx를 다시 올리면 '같은 날 방문 허용' 값도 갱신된다.
