@@ -22,6 +22,7 @@ import pandas as pd
 import streamlit as st
 
 import qc_core as qc
+from streamlit_sortables import sort_items
 
 st.set_page_config(page_title="Clinical Data QC", layout="wide")
 
@@ -135,26 +136,47 @@ def common_columns(raw_sheets):
 
 def guess_subject(cols):
     for c in cols:
-        if any(k in str(c).upper() for k in ("SUBJ", "SUBNO", "SUBJECT", "대상자", "SCR")):
+        if any(k in str(c).upper() for k in ("SUBJ", "SUBJECT", "대상자", "SCR")):
             return c
     return cols[0] if cols else None
 
 
 def guess_kw(cols, keywords):
+    def _norm(s):
+        return re.sub(r"\s+", "", str(s).upper())
+    keys = [_norm(k) for k in keywords]
     for c in cols:
-        if any(k in str(c).upper() for k in keywords):
+        col_norm = _norm(c)
+        if any(k in col_norm for k in keys):
             return c
     return None
-
 
 def pick(label, options, want, key, help=None):
     """want(설정값/자동감지값)가 옵션에 있으면 그 위치를 기본 선택."""
     want = qc.normalize_name(want) if want else None
     norm_opts = {qc.normalize_name(o): o for o in options}
-    idx = 0
-    if want and want in norm_opts:
-        idx = options.index(norm_opts[want])
-    return st.selectbox(label, options, index=idx, key=key, help=help)
+    default = norm_opts[want] if want and want in norm_opts else options[0]
+    # 기본값은 session_state로만 지정 (index와 동시 지정 시 Streamlit 경고 발생)
+    if st.session_state.get(key) not in options:
+        st.session_state[key] = default
+    return st.selectbox(label, options, key=key, help=help)
+
+
+def ms_state(key, options, default):
+    """multiselect 기본값을 session_state로 지정. 옵션에 없는 값은 제거."""
+    if key not in st.session_state:
+        st.session_state[key] = [v for v in default if v in options]
+    else:
+        st.session_state[key] = [v for v in st.session_state[key] if v in options]
+
+
+def num_state(key, default, lo, hi):
+    """number_input 기본값을 session_state로 지정 (범위 밖이면 보정)."""
+    try:
+        v = int(float(st.session_state.get(key, default)))
+    except (TypeError, ValueError):
+        v = int(default)
+    st.session_state[key] = min(max(v, lo), hi)
 
 # ---------- settings.xlsx 다운로드 ----------
 def build_settings_bytes():
@@ -181,13 +203,13 @@ def build_settings_bytes():
 
 # ================== 화면 ==================
 st.title("Data Management 검증")
-st.caption("rawdata와 codebook을 업로드하면 설정을 확인한 뒤 전체 검증을 한 번에 실행합니다.  \n settings.xlsx와 classification_reviewed.xlsx, date_rules.xlsx는 아래 개별 검증에서 생성·다운로드한 후 업로드하여 사용할 수 있으며, 최초 1회만 설정하면 이후에도 계속 사용할 수 있습니다.")
+st.caption("rawdata와 codebook을 업로드하면 설정을 확인한 뒤 전체 검증을 한 번에 실행합니다.  \n settings.xlsx와 classification_reviewed.xlsx, date_rules.xlsx는 아래 개별 검증에서 생성·다운로드한 후 업로드하여 사용할 수 있으며, 최초 1회만 설정하면 이후에도 계속 사용할 수 있습니다.  \n 각 항목에서 오른쪽 help 를 통해 설명 및 예시를 확인할 수 있습니다")
 st.header("1. 파일 업로드")
 st.markdown("**필수 파일**")
 r1c1, r1c2 = st.columns(2)
 with r1c1:
     raw_file = st.file_uploader("rawdata.xlsx", type=["xlsx", "xls"])
-    
+
 with r1c2:
     codebook_file = st.file_uploader("codebook.xlsx", type=["xlsx", "xls"])
 
@@ -195,13 +217,13 @@ st.markdown("**선택 파일**")
 st.caption("이전에 이 화면에서 해당 연구로 저장한 파일이 있으면 업로드하고 처음이면 비워두세요.")
 r2c1, r2c2, r2c3 = st.columns(3)
 with r2c1:
-    settings_file = st.file_uploader("settings.xlsx (선택)", type=["xlsx", "xls"])
+    settings_file = st.file_uploader("settings.xlsx", type=["xlsx", "xls"])
     st.caption("검증에 필요한 설정 파일-단계 2에서 생성됩니다")
 with r2c2:
-    classification_file = st.file_uploader("classification_reviewed.xlsx (선택)", type=["xlsx", "xls"])
+    classification_file = st.file_uploader("classification_reviewed.xlsx", type=["xlsx", "xls"])
     st.caption("코드리스트 분류 파일-단계 3에서 생성됩니다.")
 with r2c3:
-    date_rule_file = st.file_uploader("date_rules.xlsx (선택)", type=["xlsx", "xls"])
+    date_rule_file = st.file_uploader("date_rules.xlsx", type=["xlsx", "xls"])
     st.caption("날짜 규칙 파일 - 단계 4에서 생성됩니다.")
 
 if raw_file is None or codebook_file is None:
@@ -212,7 +234,7 @@ raw_sheets = qc.read_excel_all(raw_file)
 codebook = qc.read_first_sheet(codebook_file)
 sheet_names = list(raw_sheets.keys())
 raw_all = all_columns(raw_sheets)
-raw_common = common_columns(raw_sheets) or raw_all
+raw_common = raw_all
 cb_cols = [str(c).strip() for c in codebook.columns]
 
 def match_option(value, options, fallback=None):
@@ -255,13 +277,13 @@ if st.session_state.get("settings_signature") != settings_signature:
         st.session_state["cfg_visit"] = match_option(
             cfg.get("visit_col"),
             raw_common,
-            guess_kw(raw_common, ("VIS", "방문"))
+            guess_kw(raw_common, ("VISITNM", "VISIT_NM", "방문명"))
         )
 
         st.session_state["cfg_visitdt"] = match_option(
             cfg.get("visit_date_col"),
             raw_common,
-            guess_kw(raw_common, ("VISITDT", "방문일", "_DT"))
+            guess_kw(raw_common, ("VISITDT", "VISIT_DT", "방문일", "방문일자"))
         )
 
         st.session_state["cfg_var"] = match_option(
@@ -273,26 +295,26 @@ if st.session_state.get("settings_signature") != settings_signature:
         st.session_state["cfg_form"] = match_option(
             cfg.get("form_col"),
             cb_cols,
-            guess_kw(cb_cols, ("ECRF", "CRF", "FORM", "시트"))
+            guess_kw(cb_cols, ("ECRF", "FORM", "시트"))
         )
 
         st.session_state["cfg_codelist"] = match_option(
             cfg.get("codelist_col"),
             cb_cols,
-            guess_kw(cb_cols, ("코드리스트", "CODE LIST"))
+            guess_kw(cb_cols, ("코드리스트", "CODE"))
         )
 
         st.session_state["cfg_res"] = match_option(
             cfg.get("res_col"),
             cb_cols,
-            guess_kw(cb_cols, ("항목명", "ITEM LABEL", "LABEL"))
+            guess_kw(cb_cols, ("항목명", "Label"))
         )
 
         data_type_options = ["(없음)"] + cb_cols
         st.session_state["cfg_datatype"] = match_option(
             cfg.get("data_type_col"),
             data_type_options,
-            "(없음)"
+            guess_kw(cb_cols, ("Type",)) or "(없음)"
         )
 
         # 복수 선택값
@@ -319,6 +341,9 @@ if st.session_state.get("settings_signature") != settings_signature:
             if value in raw_all
         ]
 
+        # 같은 날 방문 허용: 방문명 목록이 아래에서 정해지므로 초기화 후 settings 값으로 다시 채움
+        st.session_state.pop("cfg_same_day_visits", None)
+
         # 숫자값
         st.session_state["cfg_agg_threshold"] = int(
             float(cfg.get("aggregate_threshold", 10))
@@ -344,15 +369,17 @@ with st.expander("rawdata 컬럼 매핑", expanded=True):
                            cfg.get("subject_col") or guess_subject(raw_common), "cfg_subject",
         help="ex. SUBJNO, SCR_NUM")
     with cc2:
-        visit_col = pick("방문명 컬럼", raw_common,
-                         cfg.get("visit_col") or guess_kw(raw_common, ("VIS", "방문")), "cfg_visit",
-        help="ex. VISITNM, SUB_VIS_C")
+        _visit_opts = ["(없음)"] + raw_common
+        visit_col = pick("방문명 컬럼", _visit_opts,
+                         cfg.get("visit_col") or guess_kw(raw_common, ("VIS", "방문")) or "(없음)", "cfg_visit",
+        help="ex. VISITNM, SUB_VIS_C. 방문명이 없는 연구면 '(없음)'을 선택하세요. 이 경우 방문 누락·방문일 순서 검증은 건너뜁니다.")
     with cc3:
-        _vd_opts = raw_common
+        _vd_opts = ["(없음)"] + raw_common
         visit_date_col = pick("방문일 컬럼", _vd_opts,
                               cfg.get("visit_date_col") or guess_kw(raw_all, ("VISITDT", "방문일", "_DT")) or "(없음)",
                               "cfg_visitdt",
-        help="ex. VISITDT, SUB_VIS")
+        help="ex. VISITDT, SUB_VIS. 방문일이 없는 연구면 '(없음)'을 선택하세요.")
+
     _base_default = [b for b in settings_list(cfg.get("base_sheets")) if b in sheet_names] \
         or ([sheet_names[0]] if sheet_names else [])
     # 공백차이 흡수: settings 기준시트를 정규화 매칭
@@ -360,12 +387,23 @@ with st.expander("rawdata 컬럼 매핑", expanded=True):
         _norm_map = {qc.normalize_name(s): s for s in sheet_names}
         _base_default = [_norm_map[qc.normalize_name(b)] for b in settings_list(cfg["base_sheets"])
                          if qc.normalize_name(b) in _norm_map] or _base_default
+    ms_state("cfg_base_sheets", sheet_names, _base_default)
     base_sheets = st.multiselect(
     "기준 시트",
     sheet_names,
-    default=_base_default,
     key="cfg_base_sheets",
-    help="위에서 지정한 Subject ID, 방문명의 모든 조합이 포함되도록 설정해주세요.  \n ex. Outcome_NRS, Screening_NRS")
+    help="대상자별로 예정된 방문이 존재하는지 확인할 기준 시트를 선택하세요.   \n 선택한 시트에 있는 {Subject ID, 방문명} 조합을 기준으로 다른 시트의 방문 누락 여부를 검사합니다.  \n 방문 정보가 여러 시트에 나뉘어 있으면 해당 시트를 모두 선택하세요.  \n ex. Outcome_NRS, Screening_NRS")
+    if visit_col == "(없음)":
+        visit_order_map = {}
+    else:
+        st.markdown("**방문 순서 확인**")
+        st.caption("자동으로 감지한 순서대로 나열되어 있습니다. 항목을 마우스로 끌어서 순서를 바꾸세요. "
+                   "방문일 순서 검증(5번 화면)에 이 순서가 사용됩니다.")
+        _vo_base = qc.build_visit_order_table(raw_sheets, visit_col, sheet_names=base_sheets or None)
+        _vo_options = _vo_base["방문명"].tolist()
+        _vo_key = "visit_order_sort_" + "_".join(base_sheets) + "_" + visit_col
+        visit_order_list = sort_items(_vo_options, direction="vertical", key=_vo_key)
+        visit_order_map = {qc.normalize_value(v): i for i, v in enumerate(visit_order_list)}
 
 
 with st.expander("codebook 컬럼 매핑", expanded=True):
@@ -373,8 +411,10 @@ with st.expander("codebook 컬럼 매핑", expanded=True):
     with mc1:
         variable_col = pick("변수명 컬럼", cb_cols,
                             cfg.get("variable_col") or guess_kw(cb_cols, ("변수명", "ITEM NAME", "VARIABLE")), "cfg_var")
-        form_col = pick("eCRF명/시트명 컬럼", cb_cols,
-                        cfg.get("form_col") or guess_kw(cb_cols, ("ECRF", "CRF", "FORM", "시트")), "cfg_form")
+        _form_opts = ["(없음)"] + cb_cols
+        form_col = pick("eCRF명/시트명 컬럼", _form_opts,
+                        cfg.get("form_col") or guess_kw(cb_cols, ("ECRF", "CRF", "FORM", "시트")) or "(없음)", "cfg_form",
+                        help="코드북에 시트/서식 구분 컬럼이 없으면 '(없음)'을 선택하세요. 이 경우 변수명 대조 결과에 어느 시트 소속인지는 표시되지 않지만, 검증 자체에는 영향이 없습니다.")
     with mc2:
         codelist_col = pick("코드리스트 컬럼", cb_cols,
                             cfg.get("codelist_col") or guess_kw(cb_cols, ("코드리스트", "CODE LIST")), "cfg_codelist")
@@ -384,19 +424,21 @@ with st.expander("codebook 컬럼 매핑", expanded=True):
         _dt_opts = ["(없음)"] + cb_cols
         data_type_col = pick("데이터 유형 컬럼 (선택)", _dt_opts,
                              cfg.get("data_type_col") or guess_kw(cb_cols, ("데이터유형", "DATA TYPE", "유형")) or "(없음)",
-                             "cfg_datatype")
+                             "cfg_datatype", help = "date, integer 등 변수의 데이터 유형이 기재된 컬럼을 선택하세요. 해당 컬럼이 없으면 '(없음)'을 선택하세요.")
 
 with st.expander("검증 옵션 (선택)", expanded=False):
     oc1, oc2 = st.columns(2)
     with oc1:
+        ms_state("cfg_skip_var_names", raw_all, settings_list(cfg.get("skip_var_names")))
         skip_var_names = st.multiselect(
-            "변수명검증·입력값검증·pattern 출력 제외 변수", raw_all,
-            default=[v for v in settings_list(cfg.get("skip_var_names")) if v in raw_all],     key="cfg_skip_var_names",
+            "코드북 대조 또는 값 검증 제외 변수", raw_all,
+            key="cfg_skip_var_names",
             help="'Subject ID', '최종 확인자 성명' 등과 같이 코드리스트에 없지만 문제없는 경우 선택해주세요.  \n 여기에 분류한 변수는 반드시 3.코드리스트 분류 확인에서 'free_text'로 설정해주세요.")
-        
+
+        ms_state("cfg_exclude_cols", raw_all, settings_list(cfg.get("exclude_cols")))
         exclude_cols = st.multiselect(
             "공통값 비교 제외 변수", raw_all,
-            default=[v for v in settings_list(cfg.get("exclude_cols")) if v in raw_all], key="cfg_exclude_cols",
+            key="cfg_exclude_cols",
             help = "'연구자 마지막 확인일'과 같이 동일 변수명을 사용하지만 시트별로 다른 값이 기재될 수 있는 경우 선택해주세요." )
     with oc2:
         _visit_vals = []
@@ -404,22 +446,17 @@ with st.expander("검증 옵션 (선택)", expanded=False):
             if visit_col in raw_sheets[b].columns:
                 _visit_vals += [qc.normalize_value(v) for v in raw_sheets[b][visit_col].dropna()]
         _visit_vals = sorted(set(v for v in _visit_vals if v))
-        if (
-            settings_file is not None and "cfg_same_day_visits" not in st.session_state):
-                st.session_state["cfg_same_day_visits"] = [value  for value in settings_list(cfg.get("same_day_visits"))
-        if value in _visit_vals
-    ]
-
-
-       
+        ms_state("cfg_same_day_visits", _visit_vals, settings_list(cfg.get("same_day_visits")))
         same_day_visits = st.multiselect(
             "같은 날 방문 허용", _visit_vals,
-            default=[v for v in settings_list(cfg.get("same_day_visits")) if v in _visit_vals],     key="cfg_same_day_visits",  help="Screening, Visit1과 같이 방문명은 다르지만 방문일이 같을 수 있는 경우 선택해주세요.")
+            key="cfg_same_day_visits",  help="Screening, Visit1과 같이 방문명은 다르지만 방문일이 같을 수 있는 경우 Screening을 선택해주세요.")
+        num_state("cfg_agg_threshold", cfg.get("aggregate_threshold", 10), 2, 1000)
         agg_threshold = st.number_input("집계 임계값", 2, 1000,
-                                        int(float(cfg.get("aggregate_threshold", 10))),    key="cfg_agg_threshold", 
+                                        key="cfg_agg_threshold",
         help = "같은 오류가 집계 임계값보다 많을 경우 한 행으로 축약하여 출력됩니다.")
+        num_state("cfg_pattern_threshold", cfg.get("pattern_unique_threshold", 10), 2, 100)
         pattern_threshold = st.number_input("패턴 임계값", 2, 100,
-                                            int(float(cfg.get("pattern_unique_threshold", 10))), key="cfg_pattern_threshold",
+                                            key="cfg_pattern_threshold",
         help = "한 변수의 unique 값이 패턴 임계값보다 많을 경우 'O'로 출력됩니다.")
 
 st.download_button(
@@ -433,6 +470,32 @@ st.download_button(
 # ---------- 3단계: 코드리스트 분류 미리보기·수정 ----------
 st.header("3. 코드리스트 분류 확인")
 st.caption("classification_reviewed.xlsx이 있으면 그 값을, 없으면 코드리스트를 choice / range / date / free_text로 자동 분류한 결과입니다.   \n 분류가 잘못된 변수는 표에서 codelist_type과 valid_value를 직접 수정한 뒤 아래 [분류 확정]을 누르세요.   \n 구분이 모호한 경우 free_text로 구분하세요. ")
+
+
+st.markdown("##### 변수 유형 안내")
+
+st.table({
+    "유형": ["choice", "range", "date", "free_text"],
+    "설명": [
+        "입력 가능한 값이 정해진 변수",
+        "입력 가능한 숫자 범위가 정해진 변수",
+        "날짜가 입력되는 변수",
+        "이니셜, 사유, 비고 등 정해진 허용값 없이 자유롭게 입력하는 변수",
+    ],
+    "valid_value 입력 예시": [
+        "0|1|2",
+        "0~10",
+        "",
+        "",
+    ],
+})
+
+def upload_signature(f):
+    """업로드 파일 식별값. 같은 이름으로 다시 올려도 file_id가 바뀌어 변경을 감지한다."""
+    if f is None:
+        return None
+    return (f.name, getattr(f, "size", None), getattr(f, "file_id", None))
+
 
 # 분류 생성 (classification 파일 있으면 그걸, 없으면 자동 분류)
 _cb_norm = qc.normalize_codebook_names(codebook, [variable_col, form_col])
@@ -451,7 +514,7 @@ except Exception as e:
 
 # 세션에 편집본 보관 (설정 바뀌면 재생성)
 _sig = (variable_col, codelist_col, form_col, res_col, data_type_col,
-        classification_file.name if classification_file else None)
+        upload_signature(classification_file))
 if st.session_state.get("cls_sig") != _sig:
     st.session_state["cls_sig"] = _sig
     _init = base_classification.copy()
@@ -547,14 +610,19 @@ for _sname, _sdf in raw_sheets.items():
 if "date_rules_list" not in st.session_state:
     st.session_state["date_rules_list"] = []
 
-# date_rules.xlsx 업로드분을 초기 규칙으로 (한 번만)
-if date_rule_file is not None and not st.session_state.get("date_rules_loaded"):
+# date_rules.xlsx 업로드분을 규칙으로 반영 (파일이 새로 올라오거나 교체될 때마다 다시 읽음)
+_dr_sig = upload_signature(date_rule_file)
+if date_rule_file is not None and st.session_state.get("date_rules_sig") != _dr_sig:
     try:
+        date_rule_file.seek(0)
         _up = pd.read_excel(date_rule_file)
         st.session_state["date_rules_list"] = _up.to_dict("records")
-        st.session_state["date_rules_loaded"] = True
+        st.session_state["date_rules_sig"] = _dr_sig
     except Exception as e:
         st.warning(f"date_rules 파일을 읽지 못했습니다: {e}")
+elif date_rule_file is None:
+    # 파일을 내리면 서명만 초기화 (화면에서 추가한 규칙은 유지, 같은 파일 재업로드 시 다시 반영)
+    st.session_state.pop("date_rules_sig", None)
 
 if not _date_options:
     st.info("date로 분류된 변수가 없거나 rawdata에서 찾지 못했습니다. "
@@ -634,6 +702,7 @@ if st.button("전체 검증 실행", type="primary"):
             st.session_state["cls_edited"], variable_col, codelist_col)
     except Exception as e:
         st.error(f"코드리스트 분류 규칙 생성 실패: {e}")
+        st.stop()
 
     date_rules_df = None
     if st.session_state.get("date_rules_list"):
@@ -643,7 +712,9 @@ if st.button("전체 검증 실행", type="primary"):
                 date_rules_df[_c] = date_rules_df[_c].apply(qc.normalize_name)
 
     config = {
-        "subject_col": subject_col, "visit_col": visit_col, "base_list": base_sheets,
+        "subject_col": subject_col,
+        "visit_col": None if visit_col == "(없음)" else visit_col,
+        "base_list": base_sheets,
         "variable_col": variable_col, "codelist_col": codelist_col,
         "form_col": form_col, "res_col": res_col,
         "exclude_cols": exclude_cols, "skip_var_names": skip_var_names,
@@ -651,6 +722,7 @@ if st.button("전체 검증 실행", type="primary"):
         "visit_date_col": None if visit_date_col == "(없음)" else visit_date_col,
         "aggregate_threshold": int(agg_threshold),
         "pattern_unique_threshold": int(pattern_threshold),
+        "visit_order_map": visit_order_map,
     }
 
     with st.spinner("검증 실행 중..."):
@@ -658,7 +730,7 @@ if st.button("전체 검증 실행", type="primary"):
             raw_sheets, cb_norm, config, rules_df=rules_df, date_rules_df=date_rules_df)
     st.session_state["ran"] = True
 
-# ---------- 4단계: 대시보드 ----------
+# ---------- 6단계: 대시보드 ----------
 if st.session_state.get("ran"):
     outcome = st.session_state["outcome"]
     all_issues = outcome["all_issues"]
@@ -666,45 +738,105 @@ if st.session_state.get("ran"):
     counts = outcome["counts"]
     total = outcome["total_issues"]
 
-    st.header("4. 결과")
+    st.header("6. 결과")
 
     LABELS = {
-        "variable_name_issues": "변수명 대조",
-        "codelist_issues": "코드값 검증",
-        "visit_missing_issues": "방문 누락",
-        "value_mismatch": "공통값 비교",
-        "visit_date_order_issues": "방문일 순서",
-        "date_order_issues": "날짜 선후관계",
-    }
+    "variable_name_issues": "변수명 대조",
+    "codelist_issues": "코드값 검증",
+    "visit_missing_issues": "방문 누락",
+    "value_mismatch": "공통값 비교",
+    "visit_date_order_issues": "방문일 순서",
+    "date_order_issues": "날짜 선후관계",
+}
+
+    RESULT_HELP = {
+    "variable_name_issues":
+        "코드북과 rawdata의 변수명이 일치하지 않는 항목입니다. "
+        "변수명 오탈자, 누락 또는 시트 매핑 오류인지 확인하세요.",
+
+    "codelist_issues":
+        "코드북에 정의된 허용값이나 숫자 범위를 벗어난 항목입니다. "
+        "오입력 여부와 변수 분류 및 valid_value 설정을 확인하세요.",
+
+    "visit_missing_issues":
+        "대상자별 예상 방문 중 rawdata에서 확인되지 않은 방문입니다. "
+        "실제 미방문인지, 방문명 오입력 또는 데이터 누락인지 확인하세요.",
+
+    "value_mismatch":
+        "동일 대상자의 공통 정보가 시트마다 다르게 입력된 항목입니다. "
+        "각 시트의 값을 대조하고, 시트별로 달라도 되는 변수라면 제외 변수 설정을 확인하세요.",
+
+    "visit_date_order_issues":
+        "방문일이 설정된 방문 순서와 맞지 않는 항목입니다. "
+        "방문명과 방문일을 확인하고, 같은 날 방문이 가능하면 관련 설정도 확인하세요.",
+
+    "date_order_issues":
+        "설정한 날짜 선후관계 규칙을 만족하지 않는 항목입니다. "
+        "날짜 입력값과 설정한 날짜 규칙이 올바른지 확인하세요."}
+
     st.subheader(f"검증별 오류 (총 {total}건)")
+
     metric_cols = st.columns(len(LABELS))
+
     for i, (key, label) in enumerate(LABELS.items()):
         with metric_cols[i]:
-            st.metric(label, counts.get(key, 0))
+            st.metric(
+                label=label,
+                value=counts.get(key, 0),
+                help=RESULT_HELP[key],
+            )
 
     st.subheader("전체 오류 목록 (all_issues)")
+    st.caption(
+    "검출된 오류를 한 번에 확인할 수 있습니다. "
+    "검증 유형과 대상자, 변수명, 입력값 등의 정보를 확인하여 원본 데이터를 점검하세요."
+)
     if len(all_issues) == 0:
         st.success("검출된 오류가 없습니다.")
     else:
         st.dataframe(all_issues, use_container_width=True, hide_index=True)
 
+    st.subheader("추출 결과 (free_text_unique / 값 패턴)")
+
+    st.caption(
+        "free_text_unique는 자유입력 변수에 입력된 값을 중복 없이 정리한 결과입니다.  \n pattern_{시트명}은 각 행에서 중복되는 조합을 제거하여 입력 양상을 보여주며,  \n 값 개수가 '패턴임계값' 이상인 경우 O로 표시합니다.  \n 이를 활용하여 입력값의 조합이나 흐름에 논리적 오류가 없는지 확인할 수 있습니다."
+    )
+
     if results:
-        st.subheader("추출 결과 (free_text unique / 값 패턴)")
         names = list(results.keys())
+
         for tab, name in zip(st.tabs(names), names):
             with tab:
-                st.dataframe(results[name], use_container_width=True, hide_index=True)
+                df = results[name]
+                if name.startswith("pattern_") and len(df) >= 2:
+                    _header_idx = set(df.index[:2])
 
-    st.subheader("결과 다운로드")
-    dc1, dc2 = st.columns(2)
-    with dc1:
-        st.download_button("all_issues 다운로드",
-                           data=qc.to_excel_bytes({"all_issues": all_issues}),
-                           file_name="QC_all_issues.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    with dc2:
-        if results:
-            st.download_button("unique/패턴 다운로드",
-                               data=qc.to_excel_bytes(results),
-                               file_name="QC_unique.xlsx",
+                    def _highlight_header_rows(row):
+                        if row.name in _header_idx:
+                            return ["background-color: #FFF3CD"] * len(row)
+                        return [""] * len(row)
+
+                    st.dataframe(
+                        df.style.apply(_highlight_header_rows, axis=1).hide(axis="index"),
+                        use_container_width=True,
+                    )
+                else:
+                    st.dataframe(
+                        df,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                
+        st.subheader("결과 다운로드")
+        dc1, dc2 = st.columns(2)
+        with dc1:
+            st.download_button("all_issues 다운로드",
+                               data=qc.to_excel_bytes({"all_issues": all_issues}),
+                               file_name="QC_all_issues.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        with dc2:
+            if results:
+                st.download_button("unique/패턴 다운로드",
+                                   data=qc.to_excel_bytes(results),
+                                   file_name="QC_unique.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

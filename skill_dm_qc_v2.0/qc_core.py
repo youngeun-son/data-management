@@ -204,12 +204,42 @@ def extract_visit_order(value):
             return order
     return None
 
+def build_visit_order_table(raw_sheets, visit_col, sheet_names=None):
+    """방문명별로 extract_visit_order가 자동으로 감지한 순서를 정리해서 반환한다(검토·수정용).
+    sheet_names를 지정하면 그 시트들에서만 방문명을 모으고, 없으면 전체 시트에서 모은다."""
+    sheets = sheet_names or list(raw_sheets.keys())
+    visits = set()
+    for name in sheets:
+        if name not in raw_sheets:
+            continue
+        df = raw_sheets[name]
+        if visit_col not in df.columns:
+            continue
+        for v in df[visit_col].dropna():
+            nv = normalize_value(v)
+            if nv:
+                visits.add(nv)
+
+    rows = [{"방문명": v, "자동감지순서": extract_visit_order(v)} for v in visits]
+    rows.sort(key=lambda r: (r["자동감지순서"] is None,
+                             r["자동감지순서"] if r["자동감지순서"] is not None else 0,
+                             r["방문명"]))
+    return pd.DataFrame(rows, columns=["방문명", "자동감지순서"])
+
+
 def parse_partial_date(value, mode):
     """불완전 날짜를 보수적으로 파싱.
     mode='earliest' → 모르는 부분 최소(월01,일01), 'latest' → 최대(월12,말일).
     UK/UNK/00/공백 등을 '모름'으로 인식. 연도조차 모르면 NaT."""
     if value is None:
         return pd.NaT
+    if isinstance(value, pd.Timestamp):
+        return pd.NaT if pd.isna(value) else value.normalize()
+    if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+        try:
+            return pd.Timestamp(year=value.year, month=value.month, day=value.day)
+        except Exception:
+            pass    
     s = str(value).strip()
     if s == "" or s.lower() in ("nan", "nat", "none"):
         return pd.NaT
@@ -421,6 +451,13 @@ def parse_choice_values(text, dynamic_visit_min=2, dynamic_visit_max=99):
                 seg = seg.strip()
                 if "=" in seg:
                     allowed.add(normalize_value(seg.split("=", 1)[0]))
+            continue
+
+        if ":" in part:
+            for seg in part.split(","):
+                seg = seg.strip()
+                if ":" in seg:
+                    allowed.add(normalize_value(seg.split(":", 1)[0]))
             continue
 
         if "," in part:
@@ -1157,40 +1194,52 @@ def make_value_patterns(raw_sheets, subject_col, visit_col,
     return out
 
 
-def validate_visit_date_order(raw_sheets, base_sheet, subject_col, visit_order_col, visit_date_col,
-                              labels=None, same_day_visits=None):
-    if base_sheet not in raw_sheets:
-        raise ValueError(f"기준 시트가 없습니다: {base_sheet}")
-
-    base_df = raw_sheets[base_sheet].copy()
+def validate_visit_date_order(raw_sheets, base_sheets, subject_col, visit_order_col, visit_date_col, labels=None, same_day_visits=None, visit_order_map=None):
+    """방문순서 ↔ 방문일 정합성 검증. base_sheets: 시트명 1개(str) 또는 리스트.
+    여러 시트에 방문 기록이 나뉘어 있으면 리스트 순서대로 합쳐서 대상자별 방문 순서를 검사한다."""
+    if isinstance(base_sheets, str):
+        base_sheets = [base_sheets]
+    base_list = [b for b in base_sheets if b in raw_sheets]
+    if not base_list:
+        raise ValueError(f"기준 시트가 없습니다: {base_sheets}")
 
     needed_cols = [subject_col, visit_order_col, visit_date_col]
-    missing_cols = [col for col in needed_cols if col not in base_df.columns]
+    frames = []
+    for b in base_list:
+        bdf = raw_sheets[b]
+        missing_cols = [c for c in needed_cols if c not in bdf.columns]
+        if missing_cols:
+            continue
+        tmp = bdf[needed_cols].copy()
+        tmp["_sheet"] = b
+        tmp["_row_number"] = bdf.index + 2
+        frames.append(tmp)
+    if not frames:
+        raise ValueError(f"기준 시트에 필요한 컬럼이 없습니다: {needed_cols}")
 
-    if missing_cols:
-        raise ValueError(f"기준 시트에 필요한 컬럼이 없습니다: {missing_cols}")
-
+    base_df = pd.concat(frames, ignore_index=True)
     same_day_set = {normalize_value(v) for v in (same_day_visits or [])}
 
     base_df["_subject_norm"] = base_df[subject_col].apply(normalize_value)
-    base_df["_visit_order_num"] = base_df[visit_order_col].apply(extract_visit_order)
+    def _resolve_order(v):
+        nv = normalize_value(v)
+        if visit_order_map and nv in visit_order_map:
+            return visit_order_map[nv]
+        return extract_visit_order(v)
+
+    base_df["_visit_order_num"] = base_df[visit_order_col].apply(_resolve_order)
     base_df["_visit_date"] = pd.to_datetime(base_df[visit_date_col], errors="coerce")
-    base_df["_row_number"] = base_df.index + 2
 
     issues = []
 
     invalid_rows = base_df[
         base_df["_subject_norm"].notna()
-        & (
-            base_df["_visit_order_num"].isna()
-            | base_df["_visit_date"].isna()
-        )
+        & (base_df["_visit_order_num"].isna() | base_df["_visit_date"].isna())
     ]
-
     for _, row in invalid_rows.iterrows():
         issues.append({
             "issue_type": "visit_date_parse_error",
-            "sheet": base_sheet,
+            "sheet": row["_sheet"],
             "variable": f"{visit_order_col}, {visit_date_col}",
             "subject_id": row["_subject_norm"],
             "visit": normalize_value(row[visit_order_col]),
@@ -1202,13 +1251,10 @@ def validate_visit_date_order(raw_sheets, base_sheet, subject_col, visit_order_c
             )
         })
 
-    check_df = base_df.dropna(
-        subset=["_subject_norm", "_visit_order_num", "_visit_date"]
-    ).copy()
+    check_df = base_df.dropna(subset=["_subject_norm", "_visit_order_num", "_visit_date"]).copy()
 
     for subject_id, group in check_df.groupby("_subject_norm"):
         group = group.sort_values("_visit_order_num")
-
         previous_date = None
         previous_visit = None
 
@@ -1228,7 +1274,7 @@ def validate_visit_date_order(raw_sheets, base_sheet, subject_col, visit_order_c
                 if violated:
                     issues.append({
                         "issue_type": "visit_date_order_mismatch",
-                        "sheet": base_sheet,
+                        "sheet": row["_sheet"],
                         "variable": visit_date_col,
                         "subject_id": subject_id,
                         "visit": current_visit,
@@ -1246,7 +1292,6 @@ def validate_visit_date_order(raw_sheets, base_sheet, subject_col, visit_order_c
             previous_visit = current_visit
 
     return issues_to_df(issues)
-
 
 JAMO_RE = re.compile(r"[ㄱ-ㅎㅏ-ㅣ]")       # 자모 단독 (ㄴ, ㅁ 등) = 키보드 오타
 HANGUL_RE = re.compile(r"[가-힣]")          # 완성형 한글 (연구에 따라 정상일 수 있음)
@@ -1531,7 +1576,7 @@ def validate_visit_missing_by_base(raw_sheets, base_sheets, subject_col, visit_c
                         "expected": visit,
                         "message": (
                             f"방문({visit})이 누락되어있습니다. "
-                            f"기준 명단에는 있으나 이 시트에 없습니다. 확인해주세요."
+                            f"기준 시트에는 있으나 이 시트에 없습니다. 확인해주세요."
                         )
                     })
 
@@ -1596,6 +1641,7 @@ def run_all_validations(raw_sheets, codebook, config, rules_df=None,
     target_sheets = c.get("target_sheets", []) or []
     same_day_visits = c.get("same_day_visits", []) or []
     visit_date_col = c.get("visit_date_col")
+    visit_order_map = c.get("visit_order_map")
     agg_threshold = int(c.get("aggregate_threshold", 10))
     pattern_threshold = int(c.get("pattern_unique_threshold", 10))
 
@@ -1662,7 +1708,7 @@ def run_all_validations(raw_sheets, codebook, config, rules_df=None,
             progress("value_patterns", len(patterns))
 
     # 4. 대상자별 방문 누락
-    if should_run("visit_missing"):
+    if should_run("visit_missing") and visit_col:
         report("visit_missing_issues",
                validate_visit_missing_by_base(raw_sheets, base_list, subject_col, visit_col,
                                               labels=labels))
@@ -1675,13 +1721,14 @@ def run_all_validations(raw_sheets, codebook, config, rules_df=None,
                    exclude_cols=exclude_cols + skip_var_names, labels=labels,
                    target_sheets=compare_targets))
 
-    # 6. 방문순서 ↔ 방문일 정합성
-    if should_run("visit_date_order") and visit_date_col:
+  # 6. 방문순서 ↔ 방문일 정합성
+    if should_run("visit_date_order") and visit_date_col and visit_col:
         report("visit_date_order_issues",
                validate_visit_date_order(
-                   raw_sheets, base_sheet, subject_col,
+                   raw_sheets, base_list, subject_col,
                    visit_col, visit_date_col, labels=labels,
-                   same_day_visits=same_day_visits))
+                   same_day_visits=same_day_visits,
+                   visit_order_map=visit_order_map))
 
     # 7. 날짜 선후관계 규칙
     if should_run("date_rules") and date_rules_df is not None:
